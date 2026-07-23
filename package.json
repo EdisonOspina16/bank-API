@@ -1,0 +1,33 @@
+{
+  "name": "bank-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "nodemon --exec tsx src/main/server.ts",
+    "start": "node dist/main/server.js",
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EdisonOspina16/bank-API.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/EdisonOspina16/bank-API/issues"
+  },
+  "homepage": "https://github.com/EdisonOspina16/bank-API#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "nodemon": "^3.1.14",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}
