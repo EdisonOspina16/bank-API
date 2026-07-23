@@ -21,9 +21,12 @@
   },
   "homepage": "https://github.com/EdisonOspina16/bank-API#readme",
   "dependencies": {
+    "axios": "^1.18.1",
+    "cors": "^2.8.6",
     "express": "^5.2.1"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.0",
     "nodemon": "^3.1.14",
