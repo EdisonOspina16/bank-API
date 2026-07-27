@@ -1,13 +1,1003 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+// ==========================================
+// IAM & AUTENTICACIÓN
+// ==========================================
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+  PENDING_KYC
+}
+
+model User {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String     @unique
+  phoneNumber  String     @unique @map("phone_number")
+  phoneCountry String     @default("+57") @map("phone_country")
+  passwordHash String     @map("password_hash")
+  status       UserStatus @default(PENDING_KYC)
+  version      Int        @default(1)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  deletedAt    DateTime?  @map("deleted_at")
+  createdBy    String?    @map("created_by")
+  updatedBy    String?    @map("updated_by")
+  deletedBy    String?    @map("deleted_by")
+
+  userRoles       UserRole[]
+  sessions        Session[]
+  devices         Device[]
+  otpCodes        OtpCode[]
+  passwordHistory PasswordHistory[]
+  customerProfile CustomerProfile?
+  accounts        Account[]
+  userSettings    UserSetting?
+  auditLogs       AuditLog[]
+  securityEvents  SecurityEvent[]
+  supportTickets  SupportTicket[]
+  ticketMessages  TicketMessage[]
+  notifications   Notification[]
+
+  @@map("users")
+}
+
+enum RoleName {
+  ADMIN
+  CUSTOMER
+  SUPPORT
+  COMPLIANCE
+}
+
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        RoleName @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  userRoles   UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  refreshToken String   @unique @map("refresh_token")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  isRevoked    Boolean  @default(false) @map("is_revoked")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Device {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  deviceFingerprint String   @unique @map("device_fingerprint")
+  deviceName        String?  @map("device_name")
+  deviceOs          String?  @map("device_os")
+  isTrusted         Boolean  @default(false) @map("is_trusted")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pushSubscriptions PushSubscription[]
+
+  @@map("devices")
+}
+
+enum OtpPurpose {
+  REGISTRATION
+  LOGIN
+  PASSWORD_RESET
+  SENSITIVE_TRANSACTION
+}
+
+model OtpCode {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  codeHash  String     @map("code_hash")
+  purpose   OtpPurpose
+  isUsed    Boolean    @default(false) @map("is_used")
+  expiresAt DateTime   @map("expires_at")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("otp_codes")
+}
+
+model PasswordHistory {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_history")
+}
+
+// ==========================================
+// PERFIL & KYC (KNOW YOUR CUSTOMER)
+// ==========================================
+
+enum DocType {
+  CC
+  CE
+  PA
+  NIT
+}
+
+model CustomerProfile {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @unique @map("user_id") @db.Uuid
+  firstName String    @map("first_name")
+  lastName  String    @map("last_name")
+  docType   DocType   @map("doc_type")
+  docNumber String    @unique @map("doc_number")
+  birthDate DateTime? @map("birth_date")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  identityDocuments IdentityDocument[]
+  addresses         Address[]
+
+  @@map("customer_profiles")
+}
+
+model IdentityDocument {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerProfileId String    @map("customer_profile_id") @db.Uuid
+  documentType      DocType   @map("document_type")
+  documentUrl       String    @map("document_url")
+  isVerified        Boolean   @default(false) @map("is_verified")
+  verifiedAt        DateTime? @map("verified_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+
+  @@map("identity_documents")
+}
+
+model Address {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerProfileId String   @map("customer_profile_id") @db.Uuid
+  streetAddress     String   @map("street_address")
+  postalCode        String?  @map("postal_code")
+  cityId            String   @map("city_id") @db.Uuid
+  isPrimary         Boolean  @default(true) @map("is_primary")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  city            City            @relation(fields: [cityId], references: [id], onDelete: Restrict)
+
+  @@map("addresses")
+}
+
+model Country {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code   String @unique // ISO 3166-1 alpha-2 (e.g. CO, US)
+  name   String @unique
+  cities City[]
+
+  @@map("countries")
+}
+
+model City {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  countryId String    @map("country_id") @db.Uuid
+  name      String
+  addresses Address[]
+
+  country Country @relation(fields: [countryId], references: [id], onDelete: Cascade)
+
+  @@map("cities")
+}
+
+// ==========================================
+// CUENTAS Y PLANES
+// ==========================================
+
+enum AccountType {
+  SAVINGS
+  CHECKING
+  DIGITAL
+}
+
+enum AccountPlan {
+  STANDARD
+  PLUS
+  METAL
+}
+
+model Account {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String      @map("user_id") @db.Uuid
+  accountNumber String      @unique @map("account_number")
+  type          AccountType @default(DIGITAL)
+  plan          AccountPlan @default(STANDARD)
+  balance       Decimal     @default(0.00) @db.Decimal(18, 4)
+  currencyId    String      @map("currency_id") @db.Uuid
+  version       Int         @default(1)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  deletedAt     DateTime?   @map("deleted_at")
+
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  currency          Currency              @relation(fields: [currencyId], references: [id], onDelete: Restrict)
+  cards             Card[]
+  loans             Loan[]
+  sentTransfers     Transfer[]            @relation("SenderAccount")
+  receivedTransfers Transfer[]            @relation("ReceiverAccount")
+  ledgerEntries     LedgerEntry[]
+  movements         Movement[]
+  beneficiaries     TransferBeneficiary[] @relation("BeneficiaryAccount")
+  creditAccount     CreditAccount?
+  planHistory       AccountPlanHistory[]
+
+  @@map("accounts")
+}
+
+model AccountPlanHistory {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId String      @map("account_id") @db.Uuid
+  oldPlan   AccountPlan @map("old_plan")
+  newPlan   AccountPlan @map("new_plan")
+  changedAt DateTime    @default(now()) @map("changed_at")
+  reason    String?
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("account_plan_history")
+}
+
+// ==========================================
+// LIBRO MAYOR (LEDGER) & MOVIMIENTOS
+// ==========================================
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+model LedgerAccount {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String            @unique // E.g., 1101 (Savings Accounts Liability)
+  name        String
+  type        LedgerAccountType
+  description String?
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  entries LedgerEntry[]
+
+  @@map("ledger_accounts")
+}
+
+model LedgerEntry {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ledgerAccountId  String   @map("ledger_account_id") @db.Uuid
+  accountId        String?  @map("account_id") @db.Uuid // Nullable for bank's internal entries
+  transactionLegId String   @map("transaction_leg_id") @db.Uuid
+  amount           Decimal  @db.Decimal(18, 4) // Positive is Debit, Negative is Credit
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  ledgerAccount  LedgerAccount  @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict)
+  account        Account?       @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  transactionLeg TransactionLeg @relation(fields: [transactionLegId], references: [id], onDelete: Cascade)
+
+  @@map("ledger_entries")
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum TransactionType {
+  TRANSFER_INTERNAL
+  TRANSFER_EXTERNAL
+  DEPOSIT
+  WITHDRAWAL
+  CARD_PURCHASE
+  LOAN_DISBURSEMENT
+  LOAN_PAYMENT
+  FEE
+  INTEREST
+  CONVERSION
+}
+
+model Transaction {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  idempotencyKey String            @unique @map("idempotency_key")
+  type           TransactionType
+  status         TransactionStatus @default(PENDING)
+  description    String?
+  errorMessage   String?           @map("error_message")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  legs             TransactionLeg[]
+  transfers        Transfer[]
+  cardTransactions CardTransaction[]
+  loanPayments     LoanPayment[]
+  conversions      CurrencyConversion[]
+
+  @@map("transactions")
+}
+
+model TransactionLeg {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId String   @map("transaction_id") @db.Uuid
+  accountId     String?  @map("account_id") @db.Uuid
+  amount        Decimal  @db.Decimal(18, 4)
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  transaction   Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  ledgerEntries LedgerEntry[]
+
+  @@map("transaction_legs")
+}
+
+model MovementCategory {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique
+  iconType  String   @map("icon_type")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  movements Movement[]
+
+  @@map("movement_categories")
+}
+
+// Materialized feed representation of a transaction leg for the customer
+model Movement {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId          String   @map("account_id") @db.Uuid
+  movementCategoryId String   @map("movement_category_id") @db.Uuid
+  amount             Decimal  @db.Decimal(18, 4) // Negative for expense, positive for income
+  description        String
+  reference          String?
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  account  Account          @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category MovementCategory @relation(fields: [movementCategoryId], references: [id], onDelete: Restrict)
+
+  @@map("movements")
+}
+
+// ==========================================
+// TRANSFERENCIAS Y BENEFICIARIOS
+// ==========================================
+
+model Transfer {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId         String   @map("transaction_id") @db.Uuid
+  senderAccountId       String   @map("sender_account_id") @db.Uuid
+  receiverAccountId     String?  @map("receiver_account_id") @db.Uuid // Null if external
+  isExternal            Boolean  @default(false) @map("is_external")
+  externalBankId        String?  @map("external_bank_id") @db.Uuid
+  externalAccountNumber String?  @map("external_account_number")
+  amount                Decimal  @db.Decimal(18, 4)
+  fee                   Decimal  @default(0.00) @db.Decimal(18, 4)
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  transaction     Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  senderAccount   Account       @relation("SenderAccount", fields: [senderAccountId], references: [id], onDelete: Restrict)
+  receiverAccount Account?      @relation("ReceiverAccount", fields: [receiverAccountId], references: [id], onDelete: Restrict)
+  externalBank    ExternalBank? @relation(fields: [externalBankId], references: [id], onDelete: Restrict)
+
+  @@map("transfers")
+}
+
+model TransferBeneficiary {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String   @map("user_id") @db.Uuid // Owner of the list
+  beneficiaryAccountId String?  @map("beneficiary_account_id") @db.Uuid // Null if external
+  isExternal           Boolean  @default(false) @map("is_external")
+  alias                String
+  name                 String
+  email                String?
+  docType              DocType? @map("doc_type")
+  docNumber            String?  @map("doc_number")
+  bankName             String?  @map("bank_name")
+  accountNumber        String   @map("account_number")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  beneficiaryAccount Account? @relation("BeneficiaryAccount", fields: [beneficiaryAccountId], references: [id], onDelete: SetNull)
+
+  @@map("transfer_beneficiaries")
+}
+
+model ExternalBank {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code      String     @unique // Bank code (ACH / Superfinanciera)
+  name      String     @unique
+  transfers Transfer[]
+
+  @@map("external_banks")
+}
+
+// ==========================================
+// TARJETAS
+// ==========================================
+
+enum CardType {
+  DEBIT
+  CREDIT
+  VIRTUAL
+}
+
+enum CardBrand {
+  VISA
+  MASTERCARD
+}
+
+enum CardStatus {
+  ACTIVE
+  BLOCKED_TEMPORARY
+  BLOCKED_PERMANENT
+  EXPIRED
+  PENDING_ACTIVATION
+}
+
+model Card {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId       String     @map("account_id") @db.Uuid
+  type            CardType
+  brand           CardBrand  @default(VISA)
+  numberHash      String     @unique @map("number_hash") // Full card number hashed
+  maskedNumber    String     @map("masked_number") // E.g., **** **** **** 1234
+  expirationMonth Int        @map("expiration_month")
+  expirationYear  Int        @map("expiration_year")
+  cvvHash         String     @map("cvv_hash") // Hashed CVV
+  pinHash         String?    @map("pin_hash") // Hashed PIN for physical cards
+  status          CardStatus @default(PENDING_ACTIVATION)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  deletedAt       DateTime?  @map("deleted_at")
+
+  account          Account           @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  controls         CardControl?
+  pinHistory       CardPinHistory[]
+  cardTransactions CardTransaction[]
+
+  @@map("cards")
+}
+
+model CardControl {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cardId       String   @unique @map("card_id") @db.Uuid
+  dailyLimit   Decimal  @default(2000000.00) @map("daily_limit") @db.Decimal(18, 4)
+  allowOnline  Boolean  @default(true) @map("allow_online")
+  allowAtm     Boolean  @default(true) @map("allow_atm")
+  allowForeign Boolean  @default(false) @map("allow_foreign")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("card_controls")
+}
+
+model CardTransaction {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cardId           String   @map("card_id") @db.Uuid
+  transactionId    String   @map("transaction_id") @db.Uuid
+  merchantName     String   @map("merchant_name")
+  merchantCategory String?  @map("merchant_category")
+  amount           Decimal  @db.Decimal(18, 4)
+  currency         String   @default("COP")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  card        Card        @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@map("card_transactions")
+}
+
+model CardPinHistory {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cardId    String   @map("card_id") @db.Uuid
+  pinHash   String   @map("pin_hash")
+  changedAt DateTime @default(now()) @map("changed_at")
+
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("card_pin_history")
+}
+
+// ==========================================
+// CUPO DE CRÉDITO ROTATIVO
+// ==========================================
+
+model CreditAccount {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId    String   @unique @map("account_id") @db.Uuid
+  creditLimit  Decimal  @map("credit_limit") @db.Decimal(18, 4)
+  usedCredit   Decimal  @default(0.00) @map("used_credit") @db.Decimal(18, 4)
+  interestRate Decimal  @map("interest_rate") @db.Decimal(5, 4) // E.g., 0.0250 (2.5%)
+  billingDay   Int      @default(15) @map("billing_day")
+  dueDay       Int      @default(5) @map("due_day")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  account    Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  statements CreditStatement[]
+
+  @@map("credit_accounts")
+}
+
+model CreditStatement {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  creditAccountId String   @map("credit_account_id") @db.Uuid
+  statementDate   DateTime @map("statement_date")
+  dueDate         DateTime @map("due_date")
+  minimumPayment  Decimal  @map("minimum_payment") @db.Decimal(18, 4)
+  totalPayment    Decimal  @map("total_payment") @db.Decimal(18, 4)
+  isPaid          Boolean  @default(false) @map("is_paid")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  creditAccount CreditAccount   @relation(fields: [creditAccountId], references: [id], onDelete: Cascade)
+  payments      CreditPayment[]
+
+  @@map("credit_statements")
+}
+
+model CreditPayment {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  creditStatementId String   @map("credit_statement_id") @db.Uuid
+  amount            Decimal  @db.Decimal(18, 4)
+  paidAt            DateTime @default(now()) @map("paid_at")
+
+  creditStatement CreditStatement @relation(fields: [creditStatementId], references: [id], onDelete: Cascade)
+
+  @@map("credit_payments")
+}
+
+// ==========================================
+// PRÉSTAMOS
+// ==========================================
+
+enum LoanStatus {
+  PENDING_APPROVAL
+  APPROVED
+  DISBURSED
+  ACTIVE
+  PAID
+  DEFAULTED
+  REJECTED
+}
+
+model Loan {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId      String     @map("account_id") @db.Uuid
+  amount         Decimal    @db.Decimal(18, 4)
+  interestRate   Decimal    @map("interest_rate") @db.Decimal(5, 4) // Interés anual
+  termMonths     Int        @map("term_months")
+  monthlyPayment Decimal    @map("monthly_payment") @db.Decimal(18, 4)
+  status         LoanStatus @default(PENDING_APPROVAL)
+  version        Int        @default(1)
+  disbursedAt    DateTime?  @map("disbursed_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  account       Account            @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  installments  LoanInstallment[]
+  amortizations LoanAmortization[]
+
+  @@map("loans")
+}
+
+model LoanInstallment {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loanId            String    @map("loan_id") @db.Uuid
+  installmentNumber Int       @map("installment_number")
+  dueDate           DateTime  @map("due_date")
+  principalAmount   Decimal   @map("principal_amount") @db.Decimal(18, 4)
+  interestAmount    Decimal   @map("interest_amount") @db.Decimal(18, 4)
+  totalAmount       Decimal   @map("total_amount") @db.Decimal(18, 4)
+  remainingBalance  Decimal   @map("remaining_balance") @db.Decimal(18, 4)
+  isPaid            Boolean   @default(false) @map("is_paid")
+  paidAt            DateTime? @map("paid_at")
+
+  loan     Loan          @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  payments LoanPayment[]
+
+  @@unique([loanId, installmentNumber])
+  @@map("loan_installments")
+}
+
+model LoanAmortization {
+  id           String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loanId       String  @map("loan_id") @db.Uuid
+  month        Int
+  principal    Decimal @db.Decimal(18, 4)
+  interest     Decimal @db.Decimal(18, 4)
+  totalPayment Decimal @map("total_payment") @db.Decimal(18, 4)
+  balance      Decimal @db.Decimal(18, 4)
+
+  loan Loan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@map("loan_amortizations")
+}
+
+model LoanPayment {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loanInstallmentId String   @map("loan_installment_id") @db.Uuid
+  transactionId     String   @map("transaction_id") @db.Uuid
+  amount            Decimal  @db.Decimal(18, 4)
+  paidAt            DateTime @default(now()) @map("paid_at")
+
+  loanInstallment LoanInstallment @relation(fields: [loanInstallmentId], references: [id], onDelete: Cascade)
+  transaction     Transaction     @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@map("loan_payments")
+}
+
+model LoanSimulation {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amount         Decimal  @db.Decimal(18, 4)
+  interestRate   Decimal  @map("interest_rate") @db.Decimal(5, 4)
+  termMonths     Int      @map("term_months")
+  monthlyPayment Decimal  @map("monthly_payment") @db.Decimal(18, 4)
+  simulatedAt    DateTime @default(now()) @map("simulated_at")
+
+  @@map("loan_simulations")
+}
+
+// ==========================================
+// DIVISAS Y TRM
+// ==========================================
+
+model Currency {
+  id       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code     String    @unique // ISO 4217 (e.g. COP, USD, EUR)
+  symbol   String
+  name     String    @unique
+  accounts Account[]
+
+  @@map("currencies")
+}
+
+model ExchangeRate {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fromCode    String   @map("from_code") // E.g., USD
+  toCode      String   @map("to_code") // E.g., COP
+  rate        Decimal  @db.Decimal(12, 4)
+  source      String
+  effectiveAt DateTime @map("effective_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([fromCode, toCode, effectiveAt])
+  @@map("exchange_rates")
+}
+
+model CurrencyConversion {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId   String   @map("transaction_id") @db.Uuid
+  fromCurrency    String   @map("from_currency")
+  toCurrency      String   @map("to_currency")
+  amount          Decimal  @db.Decimal(18, 4)
+  convertedAmount Decimal  @map("converted_amount") @db.Decimal(18, 4)
+  appliedRate     Decimal  @map("applied_rate") @db.Decimal(12, 4)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@map("currency_conversions")
+}
+
+// ==========================================
+// NOTIFICACIONES
+// ==========================================
+
+model Notification {
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  title     String
+  body      String
+  channel   NotificationChannel
+  isRead    Boolean             @default(false) @map("is_read")
+  readAt    DateTime?           @map("read_at")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+}
+
+model NotificationTemplate {
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String              @unique
+  channel   NotificationChannel
+  subject   String?
+  body      String
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  @@map("notification_templates")
+}
+
+model NotificationPreference {
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  channel   NotificationChannel
+  isEnabled Boolean             @default(true) @map("is_enabled")
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  @@unique([userId, channel])
+  @@map("notification_preferences")
+}
+
+model PushSubscription {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId  String   @map("device_id") @db.Uuid
+  token     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("push_subscriptions")
+}
+
+// ==========================================
+// SOPORTE Y PQRS
+// ==========================================
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model SupportTicket {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  categoryId String         @map("category_id") @db.Uuid
+  subject    String
+  status     TicketStatus   @default(OPEN)
+  priority   TicketPriority @default(MEDIUM)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category    TicketCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  messages    TicketMessage[]
+  attachments TicketAttachment[]
+
+  @@map("support_tickets")
+}
+
+model TicketCategory {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tickets SupportTicket[]
+
+  @@map("ticket_categories")
+}
+
+model TicketMessage {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId  String   @map("ticket_id") @db.Uuid
+  senderId  String   @map("sender_id") @db.Uuid
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("ticket_messages")
+}
+
+model TicketAttachment {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId  String   @map("ticket_id") @db.Uuid
+  fileUrl   String   @map("file_url")
+  fileName  String   @map("file_name")
+  fileSize  Int      @map("file_size")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("ticket_attachments")
+}
+
+// ==========================================
+// AUDITORÍA Y SEGURIDAD
+// ==========================================
+
+model AuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String // E.g., CREATE_ACCOUNT, BLOCK_CARD
+  module    String // E.g., ACCOUNTS, CARDS
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  payload   Json? // Request body or state snapshot before/after
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+model SecurityEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  eventType   String   @map("event_type") // E.g., SUSPICIOUS_LOGIN, FRAUD_ALERT, PIN_BRUTE_FORCE
+  severity    String // E.g., LOW, MEDIUM, HIGH, CRITICAL
+  description String
+  ipAddress   String?  @map("ip_address")
+  payload     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fraudFlags FraudFlag[]
+
+  @@map("security_events")
+}
+
+model FraudFlag {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  securityEventId String    @map("security_event_id") @db.Uuid
+  score           Decimal   @db.Decimal(5, 2) // E.g., 99.50%
+  status          String    @default("PENDING_REVIEW") // E.g., CONFIRMED, DISMISSED, PENDING_REVIEW
+  reviewedBy      String?   @map("reviewed_by")
+  reviewedAt      DateTime? @map("reviewed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  securityEvent SecurityEvent @relation(fields: [securityEventId], references: [id], onDelete: Cascade)
+
+  @@map("fraud_flags")
+}
+
+model LoginAttempt {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email     String
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  isSuccess Boolean  @map("is_success")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("login_attempts")
+}
+
+model FieldChangeLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tableName String   @map("table_name")
+  recordId  String   @map("record_id")
+  fieldName String   @map("field_name")
+  oldValue  String?  @map("old_value")
+  newValue  String?  @map("new_value")
+  changedBy String   @map("changed_by")
+  changedAt DateTime @default(now()) @map("changed_at")
+
+  @@map("field_change_logs")
+}
+
+// ==========================================
+// CONFIGURACIÓN Y FEATURE FLAGS
+// ==========================================
+
+model SystemSetting {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String   @unique
+  value       String
+  description String?
+  updatedBy   String   @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+model UserSetting {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String   @unique @map("user_id") @db.Uuid
+  language   String   @default("es")
+  theme      String   @default("light")
+  biometrics Boolean  @default(false)
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model FeatureFlag {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @unique
+  description String?
+  isEnabled   Boolean  @default(false) @map("is_enabled")
+  rules       Json? // E.g., limit activation to "PLUS" subscribers
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("feature_flags")
 }
