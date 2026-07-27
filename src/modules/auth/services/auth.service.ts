@@ -28,7 +28,12 @@ export class AuthService {
     email: string;
     phoneCountry: string;
     phoneNumber: string;
-    password: string;
+    password?: string;
+    pin: string;
+    firstName: string;
+    lastName: string;
+    docType: string;
+    docNumber: string;
   }): Promise<{ user: User; tokens: AuthTokens }> {
     // 1. Check for existing user
     const existing =
@@ -36,13 +41,25 @@ export class AuthService {
       (await this.userRepo.findByPhone(data.phoneNumber));
 
     if (existing) {
-      throw new Error('Email or phone number already registered.');
+      throw new Error('El correo electrónico o número de teléfono ya está registrado.');
     }
 
-    // 2. Hash the password with bcrypt (cost factor 12)
-    const passwordHash = await bcrypt.hash(data.password, BCRYPT_ROUNDS);
+    // Check if docNumber already registered
+    const existingDoc = await prisma.customerProfile.findUnique({
+      where: { docNumber: data.docNumber },
+    });
 
-    // 3. Create user + save password hash in history using an ACID transaction
+    if (existingDoc) {
+      throw new Error('El número de documento ya está registrado.');
+    }
+
+    // 2. Hash the password & PIN with bcrypt (cost factor 12)
+    const pinHash = await bcrypt.hash(data.pin, BCRYPT_ROUNDS);
+    const passwordHash = data.password
+      ? await bcrypt.hash(data.password, BCRYPT_ROUNDS)
+      : pinHash; // Fallback to PIN hash if no password is provided
+
+    // 3. Create user + profile + role + settings + default accounts in a transaction
     const user = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
@@ -50,6 +67,8 @@ export class AuthService {
           phoneCountry: data.phoneCountry,
           phoneNumber: data.phoneNumber,
           passwordHash,
+          pinHash,
+          status: 'ACTIVE', // Activate automatically for simulator access
         },
       });
 
@@ -59,15 +78,70 @@ export class AuthService {
       });
 
       // Assign CUSTOMER role
-      const customerRole = await tx.role.findUniqueOrThrow({
+      let customerRole = await tx.role.findUnique({
         where: { name: 'CUSTOMER' },
       });
+      if (!customerRole) {
+        customerRole = await tx.role.create({
+          data: { name: 'CUSTOMER', description: 'Cliente del banco' },
+        });
+      }
       await tx.userRole.create({
         data: { userId: newUser.id, roleId: customerRole.id },
       });
 
       // Create default user settings
       await tx.userSetting.create({ data: { userId: newUser.id } });
+
+      // Create Customer Profile
+      const docTypeEnum = data.docType as any; // CC, CE, PA, NIT
+      await tx.customerProfile.create({
+        data: {
+          userId: newUser.id,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          docType: docTypeEnum,
+          docNumber: data.docNumber,
+        },
+      });
+
+      // Create default COP and USD Currencies if they don't exist
+      let copCurrency = await tx.currency.findUnique({ where: { code: 'COP' } });
+      if (!copCurrency) {
+        copCurrency = await tx.currency.create({
+          data: { code: 'COP', symbol: '$', name: 'Pesos Colombianos' },
+        });
+      }
+
+      let usdCurrency = await tx.currency.findUnique({ where: { code: 'USD' } });
+      if (!usdCurrency) {
+        usdCurrency = await tx.currency.create({
+          data: { code: 'USD', symbol: '$', name: 'Dólares Americanos' },
+        });
+      }
+
+      // Create default Accounts
+      await tx.account.create({
+        data: {
+          userId: newUser.id,
+          accountNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
+          type: 'SAVINGS',
+          plan: 'STANDARD',
+          balance: 8420000.00, // Standard balance matching the UI demo
+          currencyId: copCurrency.id,
+        },
+      });
+
+      await tx.account.create({
+        data: {
+          userId: newUser.id,
+          accountNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
+          type: 'DIGITAL',
+          plan: 'STANDARD',
+          balance: 2050.75, // Standard balance matching the UI demo
+          currencyId: usdCurrency.id,
+        },
+      });
 
       return newUser;
     });
@@ -91,31 +165,30 @@ export class AuthService {
       (await this.userRepo.findByEmail(emailOrPhone)) ??
       (await this.userRepo.findByPhone(emailOrPhone));
 
-    // 2. Log attempt (always, even if user not found, for rate-limiting)
+    // 2. Log attempt
     await prisma.loginAttempt.create({
       data: {
         email: emailOrPhone,
         ipAddress,
         userAgent,
-        isSuccess: false, // will update if successful
+        isSuccess: false,
       },
     });
 
     if (!user || user.deletedAt) {
-      throw new Error('Invalid credentials.');
+      throw new Error('Credenciales inválidas.');
     }
 
     if (user.status === 'BLOCKED') {
-      throw new Error('Account is blocked. Please contact support.');
+      throw new Error('La cuenta está bloqueada. Por favor, contacta a soporte.');
     }
 
     // 3. Verify password
     const valid = await bcrypt.compare(password, user.passwordHash);
 
     if (!valid) {
-      // Record failed security event if multiple failures detected
       await this.checkBruteForce(emailOrPhone, ipAddress);
-      throw new Error('Invalid credentials.');
+      throw new Error('Credenciales inválidas.');
     }
 
     // 4. Update login attempt as successful
@@ -127,6 +200,68 @@ export class AuthService {
     const tokens = await this.issueTokens(user.id, ipAddress, userAgent);
 
     return { user, tokens };
+  }
+
+  // ─── LOGIN WITH PIN (DOCUMENT) ─────────────────────────────────────────────
+
+  async loginWithPin(
+    docType: string,
+    docNumber: string,
+    pin: string,
+    ipAddress?: string,
+    userAgent?: string
+  ): Promise<{ user: User; tokens: AuthTokens; customerProfile: any }> {
+    // 1. Find CustomerProfile by docType and docNumber
+    const customerProfile = await prisma.customerProfile.findUnique({
+      where: { docNumber },
+      include: { user: true },
+    });
+
+    if (!customerProfile || customerProfile.docType !== docType) {
+      throw new Error('Credenciales inválidas.');
+    }
+
+    const user = customerProfile.user;
+
+    // 2. Log attempt
+    await prisma.loginAttempt.create({
+      data: {
+        email: user.email,
+        ipAddress,
+        userAgent,
+        isSuccess: false,
+      },
+    });
+
+    if (!user || user.deletedAt) {
+      throw new Error('Credenciales inválidas.');
+    }
+
+    if (user.status === 'BLOCKED') {
+      throw new Error('La cuenta está bloqueada. Por favor, contacta a soporte.');
+    }
+
+    if (!user.pinHash) {
+      throw new Error('El PIN de seguridad no está configurado para esta cuenta.');
+    }
+
+    // 3. Verify PIN
+    const valid = await bcrypt.compare(pin, user.pinHash);
+
+    if (!valid) {
+      await this.checkBruteForce(user.email, ipAddress);
+      throw new Error('Credenciales inválidas.');
+    }
+
+    // 4. Update login attempt as successful
+    await prisma.loginAttempt.updateMany({
+      where: { email: user.email, isSuccess: false },
+      data: { isSuccess: true },
+    });
+
+    const tokens = await this.issueTokens(user.id, ipAddress, userAgent);
+
+    return { user, tokens, customerProfile };
   }
 
   // ─── REFRESH TOKEN ──────────────────────────────────────────────────────────

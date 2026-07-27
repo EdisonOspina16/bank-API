@@ -27,6 +27,7 @@ model User {
   phoneNumber  String     @unique @map("phone_number")
   phoneCountry String     @default("+57") @map("phone_country")
   passwordHash String     @map("password_hash")
+  pinHash      String?    @map("pin_hash")
   status       UserStatus @default(PENDING_KYC)
   version      Int        @default(1)
   createdAt    DateTime   @default(now()) @map("created_at")
