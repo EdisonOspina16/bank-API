@@ -39,7 +39,12 @@ export class AuthController {
         user: {
           id: result.user.id,
           email: result.user.email,
+          phoneCountry,
           phoneNumber: result.user.phoneNumber,
+          firstName,
+          lastName,
+          docType,
+          docNumber,
         },
         tokens: result.tokens,
       });
