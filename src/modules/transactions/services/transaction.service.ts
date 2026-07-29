@@ -197,27 +197,37 @@ export class TransactionService {
         });
 
         // 9. Create movement entries (customer-facing feed)
-        const category = await tx.movementCategory.findFirst({
-          where: { name: 'Transferencia' },
-        });
-        if (category) {
-          await tx.movement.createMany({
-            data: [
-              {
-                accountId: senderAccountId,
-                movementCategoryId: category.id,
-                amount: -amount,
-                description: description ?? `Transferencia enviada`,
-              },
-              {
-                accountId: receiverAccountId,
-                movementCategoryId: category.id,
-                amount: amount,
-                description: description ?? `Transferencia recibida`,
-              },
-            ],
+        // Ensure a movement category exists (create if missing) so customer-facing
+        // movement entries are always recorded for transfers.
+        let category = await tx.movementCategory.findUnique({ where: { name: 'Transferencia' } });
+        if (!category) {
+          category = await tx.movementCategory.create({
+            data: { name: 'Transferencia', iconType: 'transfer' },
           });
         }
+
+        const debitAmount = new Prisma.Decimal(-amount);
+        const creditAmount = new Prisma.Decimal(amount);
+
+        await tx.movement.create({
+          data: {
+            accountId: senderAccountId,
+            movementCategoryId: category.id,
+            amount: debitAmount,
+            description: description ?? 'Transferencia enviada',
+            reference: transaction.id,
+          },
+        });
+
+        await tx.movement.create({
+          data: {
+            accountId: receiverAccountId,
+            movementCategoryId: category.id,
+            amount: creditAmount,
+            description: description ?? 'Transferencia recibida',
+            reference: transaction.id,
+          },
+        });
 
         // 10. Mark transaction as COMPLETED
         const completed = await tx.transaction.update({

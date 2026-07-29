@@ -120,14 +120,14 @@ export class AuthService {
         });
       }
 
-      // Create default Accounts
+      // Create default Accounts with zero balance for new users
       await tx.account.create({
         data: {
           userId: newUser.id,
           accountNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
           type: 'SAVINGS',
           plan: 'STANDARD',
-          balance: 8420000.00, // Standard balance matching the UI demo
+          balance: 0.00,
           currencyId: copCurrency.id,
         },
       });
@@ -138,7 +138,7 @@ export class AuthService {
           accountNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
           type: 'DIGITAL',
           plan: 'STANDARD',
-          balance: 2050.75, // Standard balance matching the UI demo
+          balance: 0.00,
           currencyId: usdCurrency.id,
         },
       });

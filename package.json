@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "nodemon --exec tsx src/main/server.ts",
+    "seed:rich": "tsx scripts/seed-rich-user.ts",
     "start": "node dist/main/server.js",
     "test": "node --test"
   },
