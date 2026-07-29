@@ -18,6 +18,11 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/transfers', transferRoutes);
 app.use('/api/v1/movements', movementRoutes);
 app.use('/api/v1/accounts', accountRoutes);
+
+app.get('/', (_req, res) => {
+  res.type('text/plain').send('Bank-API ACTIVA');
+});
+
 app.use(notFoundHandler);
 app.use(errorHandler);
 
