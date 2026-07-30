@@ -7,7 +7,7 @@ import { User } from '@prisma/client';
 
 const BCRYPT_ROUNDS = 12;
 const JWT_SECRET = process.env.JWT_SECRET ?? 'change-me-in-production';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '15m';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '8h';
 const REFRESH_EXPIRES_IN_DAYS = 30;
 
 export interface AuthTokens {
@@ -140,6 +140,26 @@ export class AuthService {
           plan: 'STANDARD',
           balance: 0.00,
           currencyId: usdCurrency.id,
+        },
+      });
+
+      // Debit virtual card linked to the COP savings balance (starts at 0)
+      const numero =
+        '4821' +
+        Array.from({ length: 12 }, () => Math.floor(Math.random() * 10)).join('');
+      const formattedNumero = numero.match(/.{1,4}/g)?.join(' ') || numero;
+      const expiry = new Date();
+      expiry.setFullYear(expiry.getFullYear() + 5);
+      await tx.tarjetaDebito.create({
+        data: {
+          usuarioId: newUser.id,
+          numero: formattedNumero,
+          cvv: Math.floor(100 + Math.random() * 900).toString(),
+          cvvActualizadoEn: new Date(),
+          vence: `${String(expiry.getMonth() + 1).padStart(2, '0')}/${String(expiry.getFullYear()).slice(-2)}`,
+          saldo: 0,
+          acumuladoGmfMes: 0,
+          mesAcumulado: new Date().getMonth() + 1,
         },
       });
 

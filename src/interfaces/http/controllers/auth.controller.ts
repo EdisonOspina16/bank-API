@@ -87,6 +87,21 @@ export class AuthController {
       res.status(401).json({ error: error.message || 'Credenciales inválidas.' });
     }
   };
+
+  refresh = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { refreshToken } = req.body;
+      if (!refreshToken) {
+        res.status(400).json({ error: 'refreshToken es obligatorio.' });
+        return;
+      }
+
+      const tokens = await this.authService.refreshToken(refreshToken);
+      res.status(200).json({ tokens });
+    } catch (error: any) {
+      res.status(401).json({ error: error.message || 'Refresh token inválido o expirado.' });
+    }
+  };
 }
 
 export default AuthController;

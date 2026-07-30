@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/EdisonOspina16/bank-API#readme",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1098.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "axios": "^1.18.1",
@@ -40,7 +41,7 @@
     "@types/node": "^24.0.0",
     "@types/uuid": "^10.0.0",
     "nodemon": "^3.1.14",
-    "prisma": "^7.9.0",
+    "prisma": "^7.9.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   }
