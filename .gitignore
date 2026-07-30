@@ -6,3 +6,9 @@ dist/
 .claude/
 .windsurf/
 /src/generated/prisma
+
+# Notas y scripts locales
+prompt.md
+SEGUIMIENTO.md
+check_schema.sql
+tmp_prisma_query.sql
