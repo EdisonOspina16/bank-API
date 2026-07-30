@@ -1,4 +1,10 @@
-import { Loan, LoanInstallment, LoanStatus } from '@prisma/client';
+import {
+  Loan,
+  LoanInstallment,
+  LoanStatus,
+  TransactionStatus,
+  TransactionType,
+} from '@prisma/client';
 import prisma from '../../../infrastructure/database/prisma-client';
 import { PrismaLoanRepository } from '../repositories/prisma/prisma-loan.repository';
 
@@ -16,6 +22,12 @@ export interface LoanSimulationResult {
     totalPayment: number;
     balance: number;
   }[];
+}
+
+export interface LoanDisbursementResult {
+  loan: Loan;
+  transactionId: string;
+  newBalance: number;
 }
 
 export class LoanService {
@@ -120,7 +132,160 @@ export class LoanService {
       return loan;
     });
   }
+    // ─── DISBURSE LOAN ─────────────────────────────────────────────────────────
 
+  async disburseLoan(
+    accountId: string,
+    amount: number,
+    annualRate: number,
+    termMonths: number,
+    idempotencyKey: string
+  ): Promise<LoanDisbursementResult> {
+    const simulation = this.simulate(amount, annualRate, termMonths);
+
+    return prisma.$transaction(async (tx) => {
+      const account = await tx.account.findFirst({
+        where: {
+          id: accountId,
+          deletedAt: null,
+        },
+      });
+
+      if (!account) {
+        throw new Error('Account not found.');
+      }
+
+      const existingTransaction = await tx.transaction.findUnique({
+        where: { idempotencyKey },
+      });
+
+      if (existingTransaction) {
+        throw new Error('This loan disbursement has already been processed.');
+      }
+
+      const transaction = await tx.transaction.create({
+        data: {
+          idempotencyKey,
+          type: TransactionType.LOAN_DISBURSEMENT,
+          status: TransactionStatus.PENDING,
+          description: 'Desembolso de préstamo',
+        },
+      });
+
+      const loan = await tx.loan.create({
+        data: {
+          accountId,
+          amount,
+          interestRate: annualRate,
+          termMonths,
+          monthlyPayment: simulation.monthlyPayment,
+          status: LoanStatus.DISBURSED,
+          disbursedAt: new Date(),
+        },
+      });
+
+      await tx.loanAmortization.createMany({
+        data: simulation.amortizationTable.map((row) => ({
+          loanId: loan.id,
+          month: row.month,
+          principal: row.principal,
+          interest: row.interest,
+          totalPayment: row.totalPayment,
+          balance: row.balance,
+        })),
+      });
+
+      const now = new Date();
+
+      await tx.loanInstallment.createMany({
+        data: simulation.amortizationTable.map((row) => {
+          const dueDate = new Date(now);
+          dueDate.setMonth(dueDate.getMonth() + row.month);
+
+          return {
+            loanId: loan.id,
+            installmentNumber: row.month,
+            dueDate,
+            principalAmount: row.principal,
+            interestAmount: row.interest,
+            totalAmount: row.totalPayment,
+            remainingBalance: row.balance,
+          };
+        }),
+      });
+
+      await tx.transactionLeg.createMany({
+        data: [
+          {
+            transactionId: transaction.id,
+            accountId,
+            amount,
+            description: 'Abono por desembolso de préstamo',
+          },
+          {
+            transactionId: transaction.id,
+            accountId: null,
+            amount: -amount,
+            description: 'Contrapartida de desembolso de préstamo',
+          },
+        ],
+      });
+
+      let category = await tx.movementCategory.findUnique({
+        where: { name: 'Préstamo' },
+      });
+
+      if (!category) {
+        category = await tx.movementCategory.create({
+          data: {
+            name: 'Préstamo',
+            iconType: 'loan',
+          },
+        });
+      }
+
+      await tx.movement.create({
+        data: {
+          accountId,
+          movementCategoryId: category.id,
+          amount,
+          description: 'Desembolso de préstamo',
+          reference: transaction.id,
+        },
+      });
+
+      const updated = await tx.account.updateMany({
+        where: {
+          id: accountId,
+          version: account.version,
+          deletedAt: null,
+        },
+        data: {
+          balance: { increment: amount },
+          version: { increment: 1 },
+        },
+      });
+
+      if (updated.count === 0) {
+        throw new Error('Concurrent modification detected. Please try again.');
+      }
+
+      const updatedAccount = await tx.account.findUniqueOrThrow({
+        where: { id: accountId },
+      });
+
+      await tx.transaction.update({
+        where: { id: transaction.id },
+        data: { status: TransactionStatus.COMPLETED },
+      });
+
+      return {
+        loan,
+        transactionId: transaction.id,
+        newBalance: Number(updatedAccount.balance),
+      };
+    });
+  }
   // ─── GET LOANS ──────────────────────────────────────────────────────────────
 
   async getLoansByAccount(accountId: string): Promise<Loan[]> {

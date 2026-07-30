@@ -7,6 +7,7 @@ import transferRoutes from '../interfaces/http/routes/transfer.routes';
 import movementRoutes from '../interfaces/http/routes/movement.routes';
 import accountRoutes from '../interfaces/http/routes/account.routes';
 import { errorHandler, notFoundHandler } from '../interfaces/http/middlewares/error.middleware';
+import loanRoutes from '../interfaces/http/routes/loan.routes';
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/transfers', transferRoutes);
 app.use('/api/v1/movements', movementRoutes);
 app.use('/api/v1/accounts', accountRoutes);
+app.use('/api/v1/loans', loanRoutes);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
