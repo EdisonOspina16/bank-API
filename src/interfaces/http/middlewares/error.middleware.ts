@@ -14,6 +14,14 @@ const errorHandler: ErrorRequestHandler = (
 ): void => {
   console.error('Centralized Error Logger:', error);
 
+  // Body demasiado grande (subida de documentos en base64)
+  if (error?.type === 'entity.too.large' || error?.status === 413) {
+    response.status(413).json({
+      error: 'El archivo es demasiado grande. Máximo permitido: 5MB.',
+    });
+    return;
+  }
+
   const message = error.message || 'Internal server error';
 
   if (message.startsWith('External API Error')) {
@@ -26,7 +34,7 @@ const errorHandler: ErrorRequestHandler = (
   }
 
   response.status(500).json({
-    error: 'Internal server error',
+    error: message || 'Internal server error',
     message: 'Ha ocurrido un error interno en el servidor.'
   });
 };
