@@ -27,7 +27,7 @@ const errorHandler: ErrorRequestHandler = (
   if (message.startsWith('External API Error')) {
     response.status(502).json({
       error: 'Bad Gateway',
-      message: 'No se pudo obtener la TRM desde el proveedor externo (DolarAPI). Por favor, intenta de nuevo más tarde.',
+      message: 'No se pudo obtener la TRM desde el proveedor externo. Por favor, intenta de nuevo más tarde.',
       details: message
     });
     return;

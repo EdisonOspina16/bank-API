@@ -52,6 +52,28 @@ export async function getMovementDetail(req: Request, res: Response) {
       movement.reference?.replace(/-/g, '').slice(0, 10).toUpperCase() ||
       movement.id.replace(/-/g, '').slice(0, 10).toUpperCase();
 
+    let counterpartyName: string | null = null;
+    if (movement.reference) {
+      const transfer = await prisma.transfer.findFirst({
+        where: { transactionId: movement.reference },
+        include: {
+          senderAccount: { include: { user: { include: { customerProfile: true } } } },
+          receiverAccount: { include: { user: { include: { customerProfile: true } } } },
+        },
+      });
+
+      if (transfer) {
+        const isSender = transfer.senderAccountId === movement.accountId;
+        const counterpartyUser = isSender
+          ? transfer.receiverAccount?.user
+          : transfer.senderAccount?.user;
+        const profile = counterpartyUser?.customerProfile;
+        if (profile) {
+          counterpartyName = `${profile.firstName} ${profile.lastName}`;
+        }
+      }
+    }
+
     return res.json({
       id: movement.id,
       accountId: movement.accountId,
@@ -64,6 +86,7 @@ export async function getMovementDetail(req: Request, res: Response) {
       referenceCode: refCode,
       status: 'COMPLETED',
       createdAt: movement.createdAt,
+      counterpartyName,
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'Failed to get movement detail.' });
