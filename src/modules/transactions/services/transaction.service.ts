@@ -1,6 +1,10 @@
 import { Prisma, Transaction, TransactionStatus, TransactionType } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
 import prisma from '../../../infrastructure/database/prisma-client';
+import { NotificationService } from '../../notifications/services/notification.service';
+import { DebitCardService } from '../../cards/services/debit-card.service';
+
+const notificationService = new NotificationService();
+const debitCardService = new DebitCardService();
 
 /**
  * ══════════════════════════════════════════════════════════════════════════
@@ -249,6 +253,32 @@ export class TransactionService {
         maxWait: 5_000,
       }
     );
+
+    // Sync virtual debit card balances + notify both parties (outside TX)
+    const [senderAccount, receiverAccount] = await Promise.all([
+      prisma.account.findUnique({ where: { id: senderAccountId } }),
+      prisma.account.findUnique({ where: { id: receiverAccountId } }),
+    ]);
+
+    if (senderAccount) {
+      await debitCardService.syncSaldoFromAccount(senderAccount.userId);
+      await notificationService.createNotification(
+        senderAccount.userId,
+        'transferencia_realizada',
+        'Dinero enviado',
+        `Enviaste $${amount.toLocaleString('es-CO')}${description ? `: ${description}` : ''}. Nuevo saldo: $${result.senderNewBalance.toLocaleString('es-CO')}.`
+      );
+    }
+
+    if (receiverAccount) {
+      await debitCardService.syncSaldoFromAccount(receiverAccount.userId);
+      await notificationService.createNotification(
+        receiverAccount.userId,
+        'deposito_realizado',
+        'Dinero recibido',
+        `Te depositaron $${amount.toLocaleString('es-CO')}${description ? `: ${description}` : ''}. Nuevo saldo: $${result.receiverNewBalance.toLocaleString('es-CO')}.`
+      );
+    }
 
     return result;
   }

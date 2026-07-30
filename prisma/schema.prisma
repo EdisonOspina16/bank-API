@@ -50,6 +50,9 @@ model User {
   supportTickets  SupportTicket[]
   ticketMessages  TicketMessage[]
   notifications   Notification[]
+  solicitudesCredito SolicitudCredito[]
+  tarjetasCredito    TarjetaCredito[]
+  tarjetaDebito      TarjetaDebito?
 
   @@map("users")
 }
@@ -195,6 +198,9 @@ model CustomerProfile {
   docType   DocType   @map("doc_type")
   docNumber String    @unique @map("doc_number")
   birthDate DateTime? @map("birth_date")
+  ciudad    String?
+  ocupacion String?
+  ingresosMensuales Decimal? @map("ingresos_mensuales") @db.Decimal(18, 4)
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
@@ -769,6 +775,9 @@ model Notification {
   isRead    Boolean             @default(false) @map("is_read")
   readAt    DateTime?           @map("read_at")
   createdAt DateTime            @default(now()) @map("created_at")
+  tipo      String?
+  mensaje   String?
+  leida     Boolean?            @default(false)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1002,3 +1011,98 @@ model FeatureFlag {
 
   @@map("feature_flags")
 }
+
+// ==========================================
+// NUEVOS MODELOS PARA EL SISTEMA JES BANK
+// ==========================================
+
+model SolicitudCredito {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuarioId           String   @map("usuario_id") @db.Uuid
+  productoId          String   @map("producto_id")
+  datosEnviados       Json     @map("datos_enviados")
+  urlDocumentoCedula  String?  @map("url_documento_cedula")
+  urlDocumentoIngresos String? @map("url_documento_ingresos")
+  aprobada            Boolean
+  motivo              String?
+  scoreSimulado       Int?     @map("score_simulado")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  user             User             @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  tarjetasCredito  TarjetaCredito[]
+
+  @@map("solicitudes_credito")
+}
+
+model TarjetaCredito {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuarioId      String   @map("usuario_id") @db.Uuid
+  solicitudId    String?  @map("solicitud_id") @db.Uuid
+  productoId     String   @map("producto_id")
+  estado         String   @default("aprobada") // pendiente, aprobada, rechazada, cancelada
+  cupoAsignado   Decimal  @map("cupo_asignado") @db.Decimal(18, 4)
+  gastado        Decimal  @default(0) @map("gastado") @db.Decimal(18, 4)
+  numero         String
+  cvv            String
+  vence          String
+  motivoDecision String?  @map("motivo_decision")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user      User              @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  solicitud SolicitudCredito? @relation(fields: [solicitudId], references: [id])
+
+  @@map("tarjetas_credito")
+}
+
+model TarjetaDebito {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuarioId        String   @unique @map("usuario_id") @db.Uuid
+  numero           String
+  cvv              String
+  cvvActualizadoEn DateTime @default(now()) @map("cvv_actualizado_en")
+  vence            String
+  saldo            Decimal  @default(0) @db.Decimal(18, 4)
+  acumuladoGmfMes  Decimal  @default(0) @map("acumulado_gmf_mes") @db.Decimal(18, 4)
+  mesAcumulado     Int?     @map("mes_acumulado")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user          User                 @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  bolsillos     Bolsillo[]
+  transacciones TransaccionDebito[]
+
+  @@map("tarjetas_debito")
+}
+
+model Bolsillo {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tarjetaDebitoId String   @map("tarjeta_debito_id") @db.Uuid
+  nombre          String
+  limite          Decimal? @db.Decimal(18, 4)
+  icono           String?  @default("otro")
+  saldoUsado      Decimal  @default(0) @map("saldo_usado") @db.Decimal(18, 4)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  tarjetaDebito TarjetaDebito       @relation(fields: [tarjetaDebitoId], references: [id], onDelete: Cascade)
+  transacciones TransaccionDebito[]
+
+  @@map("bolsillos")
+}
+
+model TransaccionDebito {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tarjetaDebitoId    String   @map("tarjeta_debito_id") @db.Uuid
+  bolsilloId         String?  @map("bolsillo_id") @db.Uuid
+  tipo               String   // retiro, transferencia, pago_debito, pago_tarjeta_credito, deposito
+  monto              Decimal  @db.Decimal(18, 4)
+  gmf                Decimal  @default(0) @db.Decimal(18, 4)
+  montoTotalDebitado Decimal  @map("monto_total_debitado") @db.Decimal(18, 4)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  tarjetaDebito TarjetaDebito @relation(fields: [tarjetaDebitoId], references: [id], onDelete: Cascade)
+  bolsillo      Bolsillo?     @relation(fields: [bolsilloId], references: [id])
+
+  @@map("transacciones_debito")
+}
+
